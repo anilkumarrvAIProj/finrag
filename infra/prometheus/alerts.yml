@@ -1,0 +1,73 @@
+groups:
+  - name: finrag_alerts
+    rules:
+
+      # API availability
+      - alert: APIDown
+        expr: up{job="finrag-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FinRAG API is down"
+          description: "API has been unreachable for more than 1 minute."
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{job="finrag-api",status=~"5.."}[5m])
+          / rate(http_requests_total{job="finrag-api"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate (>5%)"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+
+      # Slow API response
+      - alert: SlowAPIResponse
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="finrag-api"}[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency > 5s"
+
+      # Large ingestion queue backlog
+      - alert: IngestionQueueBacklog
+        expr: celery_queue_length{queue="ingestion"} > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ingestion queue backlog > 100 tasks"
+
+      # No Celery workers
+      - alert: NoCeleryWorkers
+        expr: celery_workers_total == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All Celery workers offline"
+
+      # PostgreSQL connection pool exhaustion
+      - alert: PostgresConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections > 80"
+
+      # Redis memory pressure
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage > 85%"

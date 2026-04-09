@@ -1,0 +1,71 @@
+# API
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+
+# Database
+sqlalchemy[asyncio]
+asyncpg
+alembic
+psycopg2-binary
+
+# Cache & Queue
+redis[hiredis]
+celery[redis]
+flower
+
+# Storage
+boto3
+
+# Vector DB
+weaviate-client>=4.6.1
+
+# AI — let pip resolve compatible versions
+openai>=1.40.0
+langchain>=0.3.1
+langchain-openai>=0.2.1
+langchain-community>=0.3.1
+langchain-core>=0.3.6
+
+# Embeddings
+sentence-transformers
+rank-bm25
+
+# PDF
+pymupdf
+pdfplumber
+pillow
+python-magic
+
+# OCR
+pytesseract
+
+# NLP
+tiktoken
+
+# Auth
+python-jose[cryptography]
+passlib[bcrypt]
+cryptography
+
+# Config
+pydantic>=2.7.4
+pydantic-settings>=2.4.0
+
+# Logging
+structlog
+prometheus-client
+
+# Search
+tavily-python
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+
+# Dev
+python-dotenv
+
+openpyxl

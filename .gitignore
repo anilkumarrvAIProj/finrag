@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.cache/
+
+# Environment
+.env
+*.env.local
+
+# Docker volumes
+postgres_data/
+redis_data/
+minio_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+ssl/
+*.pem
+*.key
+*.crt
+tokensinvokecommandsanil.txt
