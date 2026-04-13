@@ -76,6 +76,7 @@ class IngestionService:
         user_id: uuid.UUID,
         db: AsyncSession,
         doc_type: Optional[DocumentType] = None,
+        fund_id: Optional[uuid.UUID] = None,
         parent_id: Optional[uuid.UUID] = None,
     ) -> Document:
 

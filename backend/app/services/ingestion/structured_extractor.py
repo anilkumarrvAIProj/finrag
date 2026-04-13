@@ -146,7 +146,8 @@ async def save_structured_data(
     db,  # SQLAlchemy async session
 ) -> Optional[str]:
     """Save extracted structured data to PostgreSQL. Returns fund_id."""
-    from app.models.structured_data import Fund, FundSnapshot, FundPosition, PersonnelChange
+    from app.models.models import Fund
+from app.models.structured_data import FundSnapshot, FundPosition, PersonnelChange
     from sqlalchemy import select
 
     if not extracted or not extracted.get("fund_name"):
@@ -158,7 +159,7 @@ async def save_structured_data(
     # Get or create fund
     fund_name = extracted["fund_name"]
     result = await db.execute(
-        select(Fund).where(Fund.fund_name == fund_name, Fund.tenant_id == tenant_uuid)
+        select(Fund).where(Fund.name == fund_name, Fund.tenant_id == tenant_uuid)
     )
     fund = result.scalar_one_or_none()
 

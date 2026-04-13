@@ -12,30 +12,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
-class Fund(Base):
-    """One record per fund/manager across all documents."""
-    __tablename__ = "funds"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    fund_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    manager_name: Mapped[Optional[str]] = mapped_column(String(255))
-    strategy: Mapped[Optional[str]] = mapped_column(String(255))   # Long/Short, Global Macro, etc.
-    inception_date: Mapped[Optional[date]] = mapped_column(Date)
-    domicile: Mapped[Optional[str]] = mapped_column(String(100))
-    currency: Mapped[Optional[str]] = mapped_column(String(10))
-    weaviate_namespace: Mapped[Optional[str]] = mapped_column(String(255))
-
-    snapshots: Mapped[list["FundSnapshot"]] = relationship(back_populates="fund")
-    positions: Mapped[list["FundPosition"]] = relationship(back_populates="fund")
-    personnel: Mapped[list["PersonnelChange"]] = relationship(back_populates="fund")
-
-    __table_args__ = (
-        Index("ix_funds_tenant", "tenant_id"),
-        Index("ix_funds_name", "fund_name"),
-    )
-
-
 class FundSnapshot(Base):
     """Point-in-time financial metrics — one row per fund per reporting period."""
     __tablename__ = "fund_snapshots"
@@ -79,7 +55,7 @@ class FundSnapshot(Base):
     benchmark_name: Mapped[Optional[str]] = mapped_column(String(100))
     benchmark_return_1yr: Mapped[Optional[float]] = mapped_column(Float)
 
-    fund: Mapped["Fund"] = relationship(back_populates="snapshots")
+    # fund relationship removed - Fund is in models.py
 
     __table_args__ = (
         Index("ix_snapshots_fund", "fund_id"),
@@ -106,7 +82,7 @@ class FundPosition(Base):
     weight_pct: Mapped[Optional[float]] = mapped_column(Float)     # % of portfolio
     rank: Mapped[Optional[int]] = mapped_column(Integer)           # 1 = top position
 
-    fund: Mapped["Fund"] = relationship(back_populates="positions")
+    # fund relationship removed - Fund is in models.py
 
     __table_args__ = (
         Index("ix_positions_fund_date", "fund_id", "report_date"),
@@ -129,7 +105,7 @@ class PersonnelChange(Base):
     effective_date: Mapped[Optional[date]] = mapped_column(Date)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    fund: Mapped["Fund"] = relationship(back_populates="personnel")
+    # fund relationship removed - Fund is in models.py
 
     __table_args__ = (Index("ix_personnel_fund", "fund_id"),)
 

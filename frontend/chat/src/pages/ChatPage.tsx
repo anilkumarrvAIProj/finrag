@@ -1,75 +1,52 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChat, ChatMessage, Citation } from '../hooks/useChat';
 import {
-  Send, Square, Globe, ChevronDown, ChevronRight,
-  FileText, ExternalLink, Zap, BookOpen, BarChart2, User,
-  Trash2, Plus,
+  Send, Square, Plus, Trash2, FileText,
+  ExternalLink, ChevronDown, ChevronRight, Globe,
 } from 'lucide-react';
-import clsx from 'clsx';
 
-const INTENT_ICONS: Record<string, any> = {
-  summary: BookOpen,
-  comparison: BarChart2,
-  personnel: User,
-  temporal: Zap,
-  metric: BarChart2,
-  general: FileText,
-};
-
-const SUGGESTED = [
-  'Show me an investment summary for the latest quarter',
-  'Compare the top 2 funds by expense ratio',
-  'Any personnel changes in the past 6 months?',
-  'What is the current AUM across all funds?',
-];
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:7200';
 
 function CitationPanel({ citations, webSources }: { citations?: Citation[]; webSources?: any[] }) {
   const [open, setOpen] = useState(false);
-  // Filter to only high-relevance citations if relevance scores are present
-  const filteredCitations = citations?.filter(c => {
-    const score = (c as any).relevance_score;
+  const filtered = citations?.filter(c => {
+    const score = c.relevance_score;
     return score === undefined || score === null || score > 0;
   });
-  const total = (filteredCitations?.length ?? 0) + (webSources?.length ?? 0);
+  const total = (filtered?.length ?? 0) + (webSources?.length ?? 0);
   if (!total) return null;
 
   return (
-    <div className="mt-3 border border-gray-100 rounded-lg overflow-hidden">
+    <div style={{ marginTop: 8, border: '0.5px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 transition text-xs text-gray-500"
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#f9fafb', border: 'none', cursor: 'pointer', fontSize: 12, color: '#6b7280' }}
       >
-        <span className="flex items-center gap-1.5">
-          <FileText size={12} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <FileText size={11} />
           {total} source{total !== 1 ? 's' : ''}
         </span>
-        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
       </button>
       {open && (
-        <div className="divide-y divide-gray-50">
-          {filteredCitations?.map(c => (
-            <div key={c.ref} className="flex items-start gap-2 px-3 py-2">
-              <span className="text-xs font-mono text-blue-500 w-6 shrink-0">[{c.ref}]</span>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-gray-700 truncate">{c.filename}</p>
-                <p className="text-xs text-gray-400">
-                  Page {c.page_start ?? '?'}
-                  {c.section_title ? ` · ${c.section_title}` : ''}
+        <div>
+          {filtered?.map(c => (
+            <div key={c.ref} style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '0.5px solid #f3f4f6' }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#3b82f6', width: 22, flexShrink: 0 }}>[{c.ref}]</span>
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#374151', margin: 0 }}>{c.filename}</p>
+                <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>
+                  Page {c.page_start ?? '?'}{c.section_title ? ` · ${c.section_title}` : ''}
                 </p>
               </div>
             </div>
           ))}
           {webSources?.map((s: any) => (
-            <div key={s.ref} className="flex items-start gap-2 px-3 py-2">
-              <span className="text-xs font-mono text-green-500 w-6 shrink-0">[W{s.ref}]</span>
-              <div className="min-w-0 flex items-center gap-1">
-                <p className="text-xs text-gray-700 truncate">{s.title}</p>
-                <a href={s.url} target="_blank" rel="noreferrer" className="shrink-0">
-                  <ExternalLink size={10} className="text-gray-400 hover:text-blue-500" />
-                </a>
-              </div>
+            <div key={s.ref} style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '0.5px solid #f3f4f6' }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#059669', width: 22, flexShrink: 0 }}>[W{s.ref}]</span>
+              <p style={{ fontSize: 12, color: '#374151', margin: 0 }}>{s.title}</p>
             </div>
           ))}
         </div>
@@ -78,241 +55,193 @@ function CitationPanel({ citations, webSources }: { citations?: Citation[]; webS
   );
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
-  const IntentIcon = msg.intent ? (INTENT_ICONS[msg.intent] ?? FileText) : null;
-
-  if (msg.role === 'user') {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[75%] bg-blue-600 text-white rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed">
-          {msg.content}
-        </div>
-      </div>
-    );
-  }
-
+function Message({ msg }: { msg: ChatMessage }) {
+  const isUser = msg.role === 'user';
   return (
-    <div className="flex gap-3 max-w-[85%]">
-      <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center shrink-0 mt-0.5">
-        <span className="text-white text-xs font-bold">F</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        {/* Intent badge */}
-        {msg.intent && IntentIcon && (
-          <div className="flex items-center gap-1.5 mb-2">
-            <IntentIcon size={11} className="text-gray-400" />
-            <span className="text-xs text-gray-400 capitalize">{msg.intent}</span>
-          </div>
+    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 12 }}>
+      {!isUser && (
+        <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#185FA5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0, marginRight: 8, marginTop: 2 }}>F</div>
+      )}
+      <div style={{ maxWidth: '75%' }}>
+        {!isUser && msg.intent && (
+          <p style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            {msg.web_search_used && <Globe size={10} />}
+            {msg.intent}
+          </p>
         )}
-
-        {/* Content */}
-        <div className={clsx(
-          'bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 leading-relaxed shadow-sm',
-          msg.streaming && 'border-blue-100'
-        )}>
-          {msg.content ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                table: ({ children }) => (
-                  <div className="overflow-x-auto my-2">
-                    <table className="text-xs border-collapse w-full">{children}</table>
-                  </div>
-                ),
-                th: ({ children }) => (
-                  <th className="bg-gray-50 border border-gray-200 px-3 py-1.5 text-left font-medium text-gray-700">{children}</th>
-                ),
-                td: ({ children }) => (
-                  <td className="border border-gray-200 px-3 py-1.5 text-gray-600">{children}</td>
-                ),
-                code: ({ children }) => (
-                  <code className="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
-                ),
-              }}
-            >
-              {msg.content}
+        <div style={{
+          padding: '10px 14px', borderRadius: 12,
+          background: isUser ? '#185FA5' : '#f3f4f6',
+          color: isUser ? 'white' : '#111',
+          fontSize: 13, lineHeight: 1.6,
+          borderBottomRightRadius: isUser ? 4 : 12,
+          borderBottomLeftRadius: isUser ? 12 : 4,
+        }}>
+          {isUser ? msg.content : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+              table: ({ children }) => <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12, marginTop: 8 }}>{children}</table>,
+              th: ({ children }) => <th style={{ background: '#e5e7eb', padding: '5px 8px', textAlign: 'left', fontWeight: 500, border: '0.5px solid #d1d5db' }}>{children}</th>,
+              td: ({ children }) => <td style={{ padding: '5px 8px', border: '0.5px solid #e5e7eb' }}>{children}</td>,
+            }}>
+              {msg.streaming ? msg.content + '▋' : msg.content}
             </ReactMarkdown>
-          ) : (
-            <div className="flex items-center gap-2 text-gray-400">
-              <span className="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
           )}
         </div>
-
-        {/* Citations + meta */}
-        {!msg.streaming && (
-          <>
-            <CitationPanel citations={msg.citations} webSources={msg.web_sources} />
-            {msg.latency_ms && (
-              <p className="text-xs text-gray-300 mt-1 ml-1">
-                {(msg.latency_ms / 1000).toFixed(1)}s
-                {msg.web_search_used && ' · web search used'}
-              </p>
-            )}
-          </>
-        )}
+        {!isUser && <CitationPanel citations={msg.citations} webSources={msg.web_sources} />}
       </div>
     </div>
   );
 }
 
 export default function ChatPage() {
-  const [query, setQuery] = useState('');
+  const {
+    messages, sessions, isStreaming, status, sessionId, quickQuestions,
+    sendMessage, stop, newSession, loadSessions, loadSession, loadQuickQuestions, deleteSession,
+  } = useChat();
+
+  const [input, setInput] = useState('');
   const [webSearch, setWebSearch] = useState(false);
-  const [outputFormat, setOutputFormat] = useState<'paragraph' | 'bullets' | 'table'>('paragraph');
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { messages, isStreaming, status, sendMessage, stop, clearMessages } = useChat({
-    enableWebSearch: webSearch,
-    outputFormat,
-  });
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, status]);
+  useEffect(() => { loadSessions(); loadQuickQuestions(); }, []);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleSend = () => {
-    const q = query.trim();
-    if (!q || isStreaming) return;
-    setQuery('');
-    sendMessage(q);
-  };
-
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (!input.trim() || isStreaming) return;
+    sendMessage(input, { enableWebSearch: webSearch });
+    setInput('');
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 font-sans">
-      {/* Header */}
-      <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-5 shadow-sm shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-white text-xs font-bold">F</div>
-          <span className="font-semibold text-sm text-gray-800">FinRAG</span>
-          <span className="text-gray-300 text-xs">· Financial Document Intelligence</span>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Format selector */}
-          <select
-            value={outputFormat}
-            onChange={e => setOutputFormat(e.target.value as any)}
-            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:outline-none"
-          >
-            <option value="paragraph">Paragraph</option>
-            <option value="bullets">Bullet Points</option>
-            <option value="table">Table</option>
-          </select>
-
-          {/* Web search toggle */}
-          <button
-            onClick={() => setWebSearch(w => !w)}
-            className={clsx(
-              'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition',
-              webSearch
-                ? 'bg-green-50 border-green-200 text-green-700'
-                : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-            )}
-          >
-            <Globe size={13} />
-            Web Search {webSearch ? 'ON' : 'OFF'}
-          </button>
-
-          {/* New chat */}
-          <button
-            onClick={clearMessages}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition"
-          >
-            <Plus size={13} />
-            New Chat
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, sans-serif', fontSize: 14 }}>
+      {/* Sidebar */}
+      <div style={{ width: 220, background: '#f9fafb', borderRight: '0.5px solid #e5e7eb', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+        <div style={{ padding: '12px 10px', borderBottom: '0.5px solid #e5e7eb' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 22, height: 22, background: '#185FA5', borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 11, fontWeight: 700 }}>F</div>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>FinRAG Chat</span>
+            </div>
+          </div>
+          <button onClick={newSession} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', background: '#185FA5', color: 'white', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+            <Plus size={13} /> New chat
           </button>
         </div>
-      </header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-5">
-        {messages.length === 0 && (
-          <div className="max-w-2xl mx-auto text-center space-y-6 pt-12">
-            <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto">
-              <span className="text-white text-2xl font-bold">F</span>
+        <div style={{ flex: 1, overflow: 'auto', padding: '8px 6px' }}>
+          <p style={{ fontSize: 10, color: '#9ca3af', padding: '0 4px', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>History</p>
+          {sessions.map(s => (
+            <div
+              key={s.id}
+              onClick={() => loadSession(s.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px',
+                borderRadius: 6, cursor: 'pointer', marginBottom: 1,
+                background: sessionId === s.id ? '#EBF4FF' : 'transparent',
+                color: sessionId === s.id ? '#185FA5' : '#374151',
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {s.title || 'Untitled'}
+              </span>
+              <button
+                onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 2, opacity: 0, transition: 'opacity 0.1s' }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '0')}
+              >
+                <Trash2 size={11} />
+              </button>
             </div>
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">FinRAG Enterprise</h1>
-              <p className="text-gray-500 text-sm mt-2">
-                Ask questions about your financial documents. All answers are grounded in source documents.
-              </p>
+          ))}
+          {sessions.length === 0 && (
+            <p style={{ fontSize: 11, color: '#9ca3af', padding: '8px 4px' }}>No previous chats</p>
+          )}
+        </div>
+
+        <div style={{ padding: '8px 10px', borderTop: '0.5px solid #e5e7eb', fontSize: 11, color: '#9ca3af' }}>
+          Grounded in indexed documents
+        </div>
+      </div>
+
+      {/* Main */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Messages */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '1.5rem' }}>
+          {messages.length === 0 && (
+            <div style={{ textAlign: 'center', paddingTop: '3rem' }}>
+              <div style={{ width: 44, height: 44, background: '#185FA5', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'white', fontSize: 20, fontWeight: 700 }}>F</div>
+              <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>FinRAG</h2>
+              <p style={{ fontSize: 13, color: '#6b7280', marginBottom: '2rem' }}>Ask anything about your indexed financial documents</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 600, margin: '0 auto' }}>
+                {quickQuestions.map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { sendMessage(q, { enableWebSearch: webSearch }); }}
+                    style={{
+                      padding: '8px 14px', border: '0.5px solid #e5e7eb', borderRadius: 20,
+                      background: 'white', fontSize: 12, cursor: 'pointer', color: '#374151',
+                    }}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-              {SUGGESTED.map(s => (
+          )}
+          {messages.map(msg => <Message key={msg.id} msg={msg} />)}
+          {status && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9ca3af', fontSize: 12, padding: '4px 36px' }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#185FA5', animation: 'pulse 1s infinite' }} />
+              {status}
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{ padding: '12px 1.5rem', borderTop: '0.5px solid #e5e7eb' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1, border: '0.5px solid #d1d5db', borderRadius: 10, padding: '8px 12px', background: 'white' }}>
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }}}
+                placeholder="Ask about performance, positions, fees..."
+                rows={1}
+                style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', fontSize: 13, fontFamily: 'inherit', background: 'transparent' }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                 <button
-                  key={s}
-                  onClick={() => sendMessage(s)}
-                  className="text-sm text-gray-700 bg-white border border-gray-200 rounded-xl px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition text-left shadow-sm"
+                  onClick={() => setWebSearch(w => !w)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '3px 8px',
+                    border: '0.5px solid', borderColor: webSearch ? '#059669' : '#d1d5db',
+                    borderRadius: 12, background: webSearch ? '#f0fdf4' : 'transparent',
+                    color: webSearch ? '#059669' : '#9ca3af', cursor: 'pointer',
+                  }}
                 >
-                  {s}
+                  <Globe size={10} /> Web search {webSearch ? 'on' : 'off'}
                 </button>
-              ))}
+              </div>
             </div>
+            <button
+              onClick={isStreaming ? stop : handleSend}
+              disabled={!isStreaming && !input.trim()}
+              style={{
+                width: 38, height: 38, borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: isStreaming ? '#ef4444' : '#185FA5',
+                color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                opacity: !isStreaming && !input.trim() ? 0.4 : 1,
+              }}
+            >
+              {isStreaming ? <Square size={14} /> : <Send size={14} />}
+            </button>
           </div>
-        )}
-
-        {messages.map(msg => (
-          <div key={msg.id} className="max-w-3xl mx-auto">
-            <MessageBubble msg={msg} />
-          </div>
-        ))}
-
-        {/* Status indicator */}
-        {isStreaming && status && (
-          <div className="max-w-3xl mx-auto flex items-center gap-2 text-xs text-gray-400 pl-10">
-            <span className="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-            {status}
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input area */}
-      <div className="bg-white border-t border-gray-200 px-4 py-4 shrink-0">
-        <div className="max-w-3xl mx-auto">
-          <div className="flex items-end gap-3 bg-white border border-gray-200 rounded-2xl px-4 py-3 shadow-sm focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100 transition">
-            <textarea
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder="Ask about your financial documents…"
-              rows={1}
-              disabled={isStreaming}
-              className="flex-1 resize-none text-sm text-gray-800 placeholder-gray-400 focus:outline-none leading-relaxed"
-              style={{ maxHeight: '120px', overflowY: 'auto' }}
-            />
-            {isStreaming ? (
-              <button
-                onClick={stop}
-                className="w-8 h-8 rounded-lg bg-red-500 hover:bg-red-600 flex items-center justify-center transition shrink-0"
-              >
-                <Square size={14} className="text-white" />
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!query.trim()}
-                className="w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 flex items-center justify-center transition shrink-0"
-              >
-                <Send size={14} className="text-white" />
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-gray-400 text-center mt-2">
-            Responses are grounded in indexed documents only · Citations shown for every claim
-          </p>
         </div>
       </div>
+
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
     </div>
   );
 }

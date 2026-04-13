@@ -179,6 +179,7 @@ async def chat_stream(
     history: list[dict],
     doc_ids: Optional[list[str]] = None,
     doc_type_filter: Optional[str] = None,
+    fund_collection: Optional[str] = None,
     enable_web_search: bool = False,
     output_format: str = "paragraph",
 ) -> AsyncGenerator[str, None]:
@@ -192,6 +193,7 @@ async def chat_stream(
         result = await retrieve(
             query=query, tenant_id=tenant_id,
             doc_ids=doc_ids, doc_type_filter=doc_type_filter,
+            fund_collection=fund_collection,
         )
     except Exception as exc:
         logger.error("Retrieval failed", error=str(exc))

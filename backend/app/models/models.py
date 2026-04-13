@@ -1,6 +1,5 @@
 """
-SQLAlchemy ORM models — uses plain String columns instead of PostgreSQL enums
-to match the migration which creates VARCHAR columns.
+SQLAlchemy ORM models — plain String columns, no PostgreSQL enum types.
 """
 import uuid
 import enum
@@ -14,7 +13,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
-# Python enums for application logic only (not mapped to PG enum types)
 class DocumentType(str, enum.Enum):
     FACT_SHEET = "fact_sheet"
     INVESTMENT_REPORT = "investment_report"
@@ -51,6 +49,8 @@ class AuditAction(str, enum.Enum):
     LOGOUT = "logout"
     ROLE_CHANGE = "role_change"
     EXPORT = "export"
+    REGISTER = "register"
+    PASSWORD_CHANGE = "password_change"
 
 
 class Tenant(Base):
@@ -61,9 +61,12 @@ class Tenant(Base):
     slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # Quick questions config for chat UI
+    quick_questions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
 
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
     documents: Mapped[list["Document"]] = relationship(back_populates="tenant")
+    funds: Mapped[list["Fund"]] = relationship(back_populates="tenant")
 
 
 class User(Base):
@@ -74,15 +77,44 @@ class User(Base):
     external_id: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     display_name: Mapped[Optional[str]] = mapped_column(String(255))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))  # bcrypt hash
     role: Mapped[str] = mapped_column(String(32), default="read_only", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
+    sessions: Mapped[list["ChatSession"]] = relationship(back_populates="user")
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "external_id"),
         Index("ix_users_tenant_id", "tenant_id"),
+        Index("ix_users_email_tenant", "email", "tenant_id"),
+    )
+
+
+class Fund(Base):
+    """One record per fund — central entity for Phase 2 fund isolation."""
+    __tablename__ = "funds"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    strategy: Mapped[Optional[str]] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Weaviate collection name for this fund's chunks
+    weaviate_collection: Mapped[Optional[str]] = mapped_column(String(255))
+    # Quick questions specific to this fund
+    quick_questions: Mapped[Optional[list]] = mapped_column(JSONB)
+    fund_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB)
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="funds")
+    documents: Mapped[list["Document"]] = relationship(back_populates="fund")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "slug"),
+        Index("ix_funds_tenant", "tenant_id"),
     )
 
 
@@ -91,6 +123,7 @@ class Document(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    fund_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("funds.id"), nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
     sha256_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -116,6 +149,7 @@ class Document(Base):
     chunk_count: Mapped[Optional[int]] = mapped_column(Integer)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="documents")
+    fund: Mapped[Optional["Fund"]] = relationship(back_populates="documents")
     chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 
@@ -143,10 +177,12 @@ class ChatSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    fund_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("funds.id"), nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String(255))
     doc_filter: Mapped[Optional[list]] = mapped_column(JSONB)
     last_active_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    user: Mapped["User"] = relationship(back_populates="sessions")
     messages: Mapped[list["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
 

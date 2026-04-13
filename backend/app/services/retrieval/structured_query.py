@@ -16,7 +16,8 @@ from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.structured_data import Fund, FundSnapshot, FundPosition, PersonnelChange
+from app.models.models import Fund
+from app.models.structured_data import FundSnapshot, FundPosition, PersonnelChange
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -255,7 +256,7 @@ async def _get_fund(db: AsyncSession, fund_name: Optional[str], tenant_id: uuid.
     result = await db.execute(
         select(Fund).where(
             Fund.tenant_id == tenant_id,
-            Fund.fund_name.ilike(f"%{fund_name}%"),
+            Fund.name.ilike(f"%{fund_name}%"),
         ).limit(1)
     )
     return result.scalar_one_or_none()

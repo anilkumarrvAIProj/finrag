@@ -1,13 +1,12 @@
 """
-Retrieval Engine
-- Hybrid retrieval: dense vector + BM25 sparse
-- Reciprocal Rank Fusion (RRF) for result merging
-- Score-threshold filtering — only cite documents that genuinely contributed
-- Context window assembly with metadata
-- Intent-based routing
+Retrieval Engine — Fund-Aware
+=============================
+When a fund_id is provided, searches ONLY that fund's Weaviate collection.
+Falls back to shared collection for cross-fund queries.
+Citation filtering keeps only high-relevance documents.
 """
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
@@ -15,6 +14,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.embedding.embedding_service import embed_single
 from app.services.embedding.weaviate_client import bm25_search, semantic_search
+from app.services.fund_service import semantic_search_fund, bm25_search_fund
 
 logger = get_logger(__name__)
 
@@ -55,45 +55,21 @@ class RetrievalResult:
     total_tokens: int
 
 
-# ── Intent Classifier ─────────────────────────────────────────────────────────
-
 INTENT_PATTERNS = {
-    QueryIntent.COMPARISON: [
-        r"\bcompare\b", r"\bvs\.?\b", r"\bversus\b", r"\bdifference\b",
-        r"\bboth\b.*\bfund", r"\bsimilar\b", r"\bcontrast\b",
-    ],
-    QueryIntent.PERSONNEL: [
-        r"\bpersonnel\b", r"\bmanager\b", r"\bstaff\b", r"\bappointment\b",
-        r"\bresign\b", r"\bjoin\b", r"\bleave\b", r"\bteam\b", r"\bwho\s+is\b",
-    ],
-    QueryIntent.TEMPORAL: [
-        r"\bq[1-4]\b", r"\bquarter\b", r"\byear\b", r"\b20\d{2}\b",
-        r"\blatest\b", r"\brecent\b", r"\bhistor\b", r"\btrend\b",
-    ],
-    QueryIntent.METRIC: [
-        r"\baum\b", r"\bnav\b", r"\breturn\b", r"\byield\b",
-        r"\bexpense ratio\b", r"\bperformance\b", r"\bgrowth\b",
-        r"\balpha\b", r"\bbeta\b", r"\bsharpe\b",
-    ],
-    QueryIntent.SUMMARY: [
-        r"\bsummar\b", r"\boverview\b", r"\bbr?ief\b", r"\bhighlight\b",
-        r"\bdescribe\b", r"\bwhat is\b", r"\btell me about\b",
-    ],
+    QueryIntent.COMPARISON: [r"\bcompare\b", r"\bvs\.?\b", r"\bversus\b", r"\bdifference\b", r"\bboth\b.*\bfund", r"\bcontrast\b"],
+    QueryIntent.PERSONNEL: [r"\bpersonnel\b", r"\bmanager\b", r"\bstaff\b", r"\bappointment\b", r"\bresign\b", r"\bjoin\b", r"\bteam\b"],
+    QueryIntent.TEMPORAL: [r"\bq[1-4]\b", r"\bquarter\b", r"\byear\b", r"\b20\d{2}\b", r"\blatest\b", r"\brecent\b", r"\btrend\b"],
+    QueryIntent.METRIC: [r"\baum\b", r"\bnav\b", r"\breturn\b", r"\bperformance\b", r"\balpha\b", r"\bbeta\b", r"\bsharpe\b"],
+    QueryIntent.SUMMARY: [r"\bsummar\b", r"\boverview\b", r"\bdescribe\b", r"\bwhat is\b", r"\btell me about\b"],
 }
 
 
 def classify_intent(query: str) -> QueryIntent:
     q = query.lower()
-    scores = {intent: 0 for intent in QueryIntent}
-    for intent, patterns in INTENT_PATTERNS.items():
-        for pattern in patterns:
-            if re.search(pattern, q):
-                scores[intent] += 1
+    scores = {intent: sum(1 for p in patterns if re.search(p, q)) for intent, patterns in INTENT_PATTERNS.items()}
     best = max(scores, key=lambda k: scores[k])
     return QueryIntent.GENERAL if scores[best] == 0 else best
 
-
-# ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
 
 def reciprocal_rank_fusion(ranked_lists: list[list[dict]], k: int = 60) -> list[dict]:
     scores: dict[str, float] = {}
@@ -103,68 +79,38 @@ def reciprocal_rank_fusion(ranked_lists: list[list[dict]], k: int = 60) -> list[
             wid = item["weaviate_id"]
             scores[wid] = scores.get(wid, 0.0) + 1.0 / (k + rank + 1)
             items[wid] = item
-    sorted_ids = sorted(scores, key=lambda x: scores[x], reverse=True)
-    results = []
-    for wid in sorted_ids:
-        item = items[wid].copy()
-        item["rrf_score"] = scores[wid]
-        results.append(item)
-    return results
+    return [dict(items[wid], rrf_score=scores[wid]) for wid in sorted(scores, key=lambda x: scores[x], reverse=True)]
 
 
-# ── Re-ranking with score threshold ──────────────────────────────────────────
+def rerank(candidates: list[dict], top_k: int) -> list[dict]:
+    return sorted(candidates, key=lambda x: x.get("rrf_score", 0), reverse=True)[:top_k]
 
-def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
-    if not candidates:
-        return []
-    sorted_candidates = sorted(candidates, key=lambda x: x.get("rrf_score", 0), reverse=True)
-    return sorted_candidates[:top_k]
-
-
-# ── Citation builder — only cite docs that genuinely contributed ───────────────
 
 def _build_citations(chunks: list[dict], score_threshold_pct: float = 0.80) -> list[dict]:
-    """
-    Build citations from chunks, but only include documents that have
-    RRF scores above a relative threshold.
-
-    score_threshold_pct = 0.5 means: only cite docs whose best chunk
-    has a score >= 50% of the top chunk's score.
-
-    This prevents listing all 3 documents when only 1 actually answered
-    the question.
-    """
+    """Only cite documents with RRF score >= 80% of top chunk score."""
     if not chunks:
         return []
 
-    # Find the top score for relative thresholding
     top_score = max(c.get("rrf_score", 0) for c in chunks)
     min_score = top_score * score_threshold_pct
 
-    # Group chunks by document, track best score per doc
-    doc_best_score: dict[str, float] = {}
+    doc_best: dict[str, float] = {}
     doc_info: dict[str, dict] = {}
 
     for chunk in chunks:
         doc_id = chunk.get("document_id", "")
         score = chunk.get("rrf_score", 0)
-        if doc_id not in doc_best_score or score > doc_best_score[doc_id]:
-            doc_best_score[doc_id] = score
-            # Store the best-scoring chunk's metadata for this doc
+        if doc_id not in doc_best or score > doc_best[doc_id]:
+            doc_best[doc_id] = score
             doc_info[doc_id] = chunk
 
-    # Only cite documents above the threshold
-    qualifying_docs = [
-        (doc_id, doc_best_score[doc_id])
-        for doc_id in doc_best_score
-        if doc_best_score[doc_id] >= min_score
-    ]
-
-    # Sort by score descending
-    qualifying_docs.sort(key=lambda x: x[1], reverse=True)
+    qualifying = sorted(
+        [(doc_id, s) for doc_id, s in doc_best.items() if s >= min_score],
+        key=lambda x: x[1], reverse=True,
+    )
 
     citations = []
-    for ref_num, (doc_id, score) in enumerate(qualifying_docs, 1):
+    for ref_num, (doc_id, score) in enumerate(qualifying, 1):
         chunk = doc_info[doc_id]
         citations.append({
             "ref": ref_num,
@@ -176,19 +122,11 @@ def _build_citations(chunks: list[dict], score_threshold_pct: float = 0.80) -> l
             "relevance_score": round(score, 4),
         })
 
-    logger.info(
-        "Citations filtered",
-        total_chunks=len(chunks),
-        qualifying_docs=len(qualifying_docs),
-        top_score=round(top_score, 4),
-        min_score=round(min_score, 4),
-    )
-
+    logger.info("Citations", total=len(chunks), qualifying=len(qualifying), top=round(top_score, 4))
     return citations
 
 
 def assemble_context(chunks: list[dict], max_tokens: int = 8000) -> tuple[str, list[dict]]:
-    """Build context string + citation list from top chunks."""
     context_parts = []
     total_tokens = 0
     used_chunks = []
@@ -197,62 +135,53 @@ def assemble_context(chunks: list[dict], max_tokens: int = 8000) -> tuple[str, l
         chunk_tokens = chunk.get("token_count", 200)
         if total_tokens + chunk_tokens > max_tokens:
             break
-        doc_header = (
+        header = (
             f"[{i+1}] {chunk.get('filename', 'Unknown')} "
             f"| Page {chunk.get('page_start', '?')} "
             f"| {chunk.get('section_title') or chunk.get('doc_type', '')}"
         )
-        context_parts.append(f"{doc_header}\n{chunk['content']}")
+        context_parts.append(f"{header}\n{chunk['content']}")
         total_tokens += chunk_tokens
         used_chunks.append(chunk)
 
-    context = "\n\n---\n\n".join(context_parts)
-    citations = _build_citations(used_chunks)
-    return context, citations
+    return "\n\n---\n\n".join(context_parts), _build_citations(used_chunks)
 
-
-# ── Main Retrieval Function ───────────────────────────────────────────────────
 
 async def retrieve(
     query: str,
     tenant_id: str,
     doc_ids: Optional[list[str]] = None,
     doc_type_filter: Optional[str] = None,
+    fund_collection: Optional[str] = None,   # Phase 2: fund-scoped search
     top_k_retrieve: int = None,
     top_k_rerank: int = None,
 ) -> RetrievalResult:
+    """
+    Hybrid retrieval with optional fund isolation.
+    If fund_collection is provided, searches ONLY that fund's collection.
+    Otherwise falls back to the shared tenant collection.
+    """
     top_k_retrieve = top_k_retrieve or settings.top_k_retrieve
     top_k_rerank = top_k_rerank or settings.top_k_rerank
 
     intent = classify_intent(query)
-    logger.info("Query intent", intent=intent.value, query=query[:80])
+    logger.info("Retrieval", intent=intent.value, fund_scoped=bool(fund_collection))
 
-    # Vector search
     query_vector = await embed_single(query)
-    vector_results = semantic_search(
-        query_vector=query_vector,
-        tenant_id=tenant_id,
-        doc_type_filter=doc_type_filter,
-        doc_ids=doc_ids,
-        top_k=top_k_retrieve,
-    )
 
-    # BM25 keyword search
-    bm25_results = bm25_search(
-        query=query,
-        tenant_id=tenant_id,
-        doc_type_filter=doc_type_filter,
-        doc_ids=doc_ids,
-        top_k=top_k_retrieve,
-    )
+    if fund_collection:
+        # Fund-scoped search — complete isolation
+        vector_results = semantic_search_fund(query_vector, fund_collection, top_k=top_k_retrieve)
+        bm25_results = bm25_search_fund(query, fund_collection, top_k=top_k_retrieve)
+    else:
+        # Shared collection — filtered by tenant
+        vector_results = semantic_search(query_vector, tenant_id, doc_type_filter, doc_ids, top_k_retrieve)
+        bm25_results = bm25_search(query, tenant_id, doc_type_filter, doc_ids, top_k_retrieve)
 
     logger.info("Raw results", vector=len(vector_results), bm25=len(bm25_results))
 
-    # RRF fusion + rerank
     fused = reciprocal_rank_fusion([vector_results, bm25_results])
-    reranked = rerank(query, fused, top_k=top_k_rerank)
-
-    # Context + citations (only relevant docs cited)
+    reranked = rerank(fused, top_k=top_k_rerank)
     context_text, citations = assemble_context(reranked)
 
     chunks = [
@@ -269,16 +198,12 @@ async def retrieve(
             report_date=c.get("report_date"),
             filename=c.get("filename", ""),
             rrf_score=c.get("rrf_score", 0.0),
-            rerank_score=c.get("rerank_score", 0.0),
         )
         for c in reranked
     ]
 
     return RetrievalResult(
-        query=query,
-        intent=intent,
-        chunks=chunks,
-        citations=citations,
+        query=query, intent=intent, chunks=chunks, citations=citations,
         context_text=context_text,
         total_tokens=sum(c.get("token_count", 0) for c in reranked),
     )

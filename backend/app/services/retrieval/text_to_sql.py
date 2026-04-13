@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 DB_SCHEMA = """
 PostgreSQL tables available:
 
-funds(id UUID, fund_name TEXT, manager_name TEXT, strategy TEXT, inception_date DATE)
+funds(id UUID, name TEXT, slug TEXT, strategy TEXT, description TEXT)
 
 fund_snapshots(id UUID, fund_id UUID, period TEXT, report_date DATE,
   aum_usd FLOAT, aum_raw TEXT,
@@ -46,7 +46,7 @@ personnel_changes(id UUID, fund_id UUID,
 fund_raw_data(id UUID, fund_id UUID, sheet_name TEXT, data JSONB)
 
 All tables join via fund_id → funds.id
-Use funds.fund_name for filtering by fund name (use ILIKE for fuzzy match)
+Use funds.name for filtering by fund name (use ILIKE for fuzzy match)
 Return amounts are as percentages (1.5 means 1.5%)
 AUM is in USD millions unless aum_raw has the original string
 """
@@ -60,7 +60,7 @@ Convert this question to a SQL query:
 
 Rules:
 1. Return ONLY the SQL query, no explanation
-2. Always join with funds table to get fund_name
+2. Always join with funds table using funds.name (NOT fund_name)
 3. Use ILIKE for fund name matching
 4. Order results meaningfully (by date DESC for time series, by value DESC for rankings)
 5. Limit to 50 rows maximum

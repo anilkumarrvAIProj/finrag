@@ -32,6 +32,7 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     doc_type: Optional[DocTypeEnum] = Form(None),
+    fund_id: Optional[uuid.UUID] = Form(None),
     parent_id: Optional[uuid.UUID] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_admin_user),
@@ -39,9 +40,10 @@ async def upload_document(
     doc = await ingestion.ingest(
         file=file,
         tenant_id=DEFAULT_TENANT,
-        user_id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+        user_id=uuid.UUID(current_user.sub),
         db=db,
         doc_type=DocumentType(doc_type.value) if doc_type else None,
+        fund_id=fund_id,
         parent_id=parent_id,
     )
     await write_audit_log(
